@@ -302,7 +302,7 @@ export default function MapPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background pb-16 relative">
+    <div className="min-h-[100svh] bg-background pb-[calc(env(safe-area-inset-bottom)+4rem)] relative">
       <header className="absolute top-0 left-0 right-0 z-50 bg-white/90 backdrop-blur-sm shadow-md">
         <div className="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -340,7 +340,7 @@ export default function MapPage() {
         </Card>
       </div>
 
-      <main className="h-screen">
+      <main className="h-[100svh]">
         {userLocation && (
           <FirstPersonView
             userLocation={userLocation}

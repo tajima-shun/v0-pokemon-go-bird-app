@@ -108,7 +108,7 @@ export function MapView({ userLocation, birdSpawns }: MapViewProps) {
       ref={mapRef}
       className="w-full h-full"
       style={{
-        minHeight: "calc(100vh - 120px)",
+        minHeight: "calc(100svh - 120px)",
       }}
     />
   )

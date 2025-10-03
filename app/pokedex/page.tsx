@@ -52,7 +52,7 @@ export default function PokedexPage() {
   const completionRate = Math.round((uniqueCaught / BIRDS.length) * 100)
 
   return (
-    <div className="min-h-screen bg-background pb-20">
+    <div className="min-h-[100svh] bg-background pb-[calc(env(safe-area-inset-bottom)+5rem)]">
       <header className="bg-primary text-primary-foreground p-4 sticky top-0 z-40 shadow-md">
         <div className="max-w-md mx-auto">
           <h1 className="text-xl font-bold mb-3">鳥図鑑</h1>
@@ -73,7 +73,7 @@ export default function PokedexPage() {
         </div>
       </header>
 
-      <main className="max-w-md mx-auto p-4">
+      <main className="max-w-md mx-auto p-4 pb-24">
         <div className="grid grid-cols-2 gap-3">
           {BIRDS.map((bird) => {
             const count = getCaughtCount(bird.id)
