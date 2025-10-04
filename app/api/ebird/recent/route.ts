@@ -5,14 +5,10 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const lat = searchParams.get("lat");
-    const lng = searchParams.get("lng");
+    const lat = searchParams.get("lat") || "35.681236"; // 東京駅
+    const lng = searchParams.get("lng") || "139.767125";
     const dist = searchParams.get("dist") ?? "10";
     const back = searchParams.get("back") ?? "7";
-
-    if (!lat || !lng) {
-      return NextResponse.json({ error: "lat,lng required" }, { status: 400 });
-    }
 
     const apiKey = process.env.EBIRD_API_KEY;
     if (!apiKey) {
@@ -20,7 +16,10 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "API key not configured" }, { status: 500 });
     }
 
-    const res = await fetch(`https://api.ebird.org/v2/data/obs/geo/recent?lat=${lat}&lng=${lng}&dist=${dist}&back=${back}`, {
+    const ebirdUrl = `https://api.ebird.org/v2/data/obs/geo/recent?lat=${lat}&lng=${lng}&dist=${dist}&back=${back}`;
+    console.log("Fetching eBird data from:", ebirdUrl);
+
+    const res = await fetch(ebirdUrl, {
       headers: {
         "X-eBirdApiToken": apiKey,
         "User-Agent": "bird-map-app (contact@example.com)"
@@ -35,6 +34,7 @@ export async function GET(request: Request) {
     }
 
     const data = await res.json();
+    console.log(`Successfully fetched ${data.length} bird observations`);
     return new Response(JSON.stringify(data), { status: 200 });
   } catch (error) {
     console.error("API fetch error:", error);
