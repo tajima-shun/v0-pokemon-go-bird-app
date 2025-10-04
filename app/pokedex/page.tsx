@@ -6,36 +6,60 @@ import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { BottomNav } from "@/components/bottom-nav"
 import { BIRDS, RARITY_COLORS, RARITY_LABELS } from "@/lib/birds"
+import type { DynamicBird } from "@/lib/ebird"
 import { storage, type CaughtBird } from "@/lib/storage"
+import { LazyBirdImage } from "@/components/lazy-bird-image"
 
 export default function PokedexPage() {
   const [caughtBirds, setCaughtBirds] = useState<CaughtBird[]>([])
   const [selectedBird, setSelectedBird] = useState<string | null>(null)
+  const [regionBirds, setRegionBirds] = useState<DynamicBird[] | null>(null)
+  const [regionName, setRegionName] = useState<string>("")
 
   useEffect(() => {
     const loadBirds = () => {
-      console.log("[v0] Loading caught birds in pokedex")
       const birds = storage.getCaughtBirds()
-      console.log("[v0] Loaded birds:", birds)
       setCaughtBirds(birds)
     }
 
     // Load on mount
     loadBirds()
 
-    // Reload when page becomes visible (user switches tabs)
+    // Also fetch region species from eBird by current location
+    const loc = storage.getUserLocation()
+    if (loc) {
+      fetch(`/api/geocode?lat=${loc.lat}&lng=${loc.lng}`)
+        .then((r) => r.json())
+        .then(async (geo) => {
+          const state = geo?.state as string | undefined
+          if (state) setRegionName(state)
+          // Pull recent species around user and use as region birds (pragmatic approximation)
+          const res = await fetch(`/api/ebird/recent?lat=${loc.lat}&lng=${loc.lng}&dist=50&back=30`)
+          if (res.ok) {
+            const arr = await res.json()
+            // Skip image enrichment for now - use placeholder
+            const mapped: DynamicBird[] = arr.slice(0, 60).map((o: any) => ({
+              id: o.speciesCode,
+              name: o.comName,
+              nameJa: o.comName,
+              species: o.sciName,
+              rarity: "common",
+              imageUrl: "/placeholder.jpg",
+              description: "",
+              habitat: "",
+            }))
+            setRegionBirds(mapped)
+          }
+        })
+        .catch(() => {})
+    }
+
+    // Reload when page becomes visible
     const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        console.log("[v0] Page became visible, reloading birds")
-        loadBirds()
-      }
+      if (!document.hidden) loadBirds()
     }
-
     document.addEventListener("visibilitychange", handleVisibilityChange)
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange)
-    }
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange)
   }, [])
 
   const getCaughtCount = (birdId: string) => {
@@ -49,13 +73,15 @@ export default function PokedexPage() {
 
   const totalCaught = caughtBirds.length
   const uniqueCaught = new Set(caughtBirds.map((cb) => cb.birdId)).size
-  const completionRate = Math.round((uniqueCaught / BIRDS.length) * 100)
+  const catalog = regionBirds ?? BIRDS
+  const completionRate = Math.round((uniqueCaught / catalog.length) * 100)
 
   return (
     <div className="min-h-[100svh] bg-background pb-[calc(env(safe-area-inset-bottom)+5rem)]">
       <header className="bg-primary text-primary-foreground p-4 sticky top-0 z-40 shadow-md">
         <div className="max-w-md mx-auto">
-          <h1 className="text-xl font-bold mb-3">鳥図鑑</h1>
+          <h1 className="text-xl font-bold mb-1">鳥図鑑</h1>
+          <p className="text-xs opacity-90">{regionName ? `${regionName} 付近の観測種 (eBird)` : "地域の観測種を取得中..."}</p>
           <div className="grid grid-cols-3 gap-2 text-center">
             <div className="bg-primary-foreground/10 rounded-lg p-2">
               <p className="text-2xl font-bold">{uniqueCaught}</p>
@@ -75,7 +101,7 @@ export default function PokedexPage() {
 
       <main className="max-w-md mx-auto p-4 pb-24">
         <div className="grid grid-cols-2 gap-3">
-          {BIRDS.map((bird) => {
+          {catalog.map((bird) => {
             const count = getCaughtCount(bird.id)
             const firstCaught = getFirstCaught(bird.id)
             const isCaught = count > 0
@@ -89,8 +115,8 @@ export default function PokedexPage() {
                 onClick={() => setSelectedBird(selectedBird === bird.id ? null : bird.id)}
               >
                 <div className="relative mb-3">
-                  <img
-                    src={bird.imageUrl || "/placeholder.svg"}
+                  <LazyBirdImage
+                    sciOrCommonName={bird.species || bird.name}
                     alt={isCaught ? bird.nameJa : "???"}
                     className={`w-full h-32 object-cover rounded-lg ${!isCaught ? "filter brightness-0" : ""}`}
                   />

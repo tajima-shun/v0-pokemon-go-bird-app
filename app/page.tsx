@@ -9,6 +9,7 @@ import { FirstPersonView } from "@/components/first-person-view"
 import { BIRDS, type BirdSpawn } from "@/lib/birds"
 import { storage } from "@/lib/storage"
 import { calculateDistance } from "@/lib/geo-utils"
+import { mapObsToBird, type DynamicBird } from "@/lib/ebird"
 
 const SPAWN_DISTANCE_THRESHOLD = 50
 
@@ -18,19 +19,18 @@ export default function MapPage() {
   const [loading, setLoading] = useState(true)
   const [nearbyCount, setNearbyCount] = useState(0)
   const [distanceWalked, setDistanceWalked] = useState(0)
-  const [heading, setHeading] = useState(0)
+  const [mode] = useState<"ar">("ar")
+  const [dynamicBirds, setDynamicBirds] = useState<DynamicBird[] | null>(null)
 
   useEffect(() => {
     // Get user location
     const savedLocation = storage.getUserLocation()
     if (savedLocation) {
-      console.log("[v0] Loaded saved location:", savedLocation)
       setUserLocation(savedLocation)
       loadBirdSpawns(savedLocation)
     } else {
       // Default to Tokyo coordinates
       const defaultLocation = { lat: 35.6762, lng: 139.6503 }
-      console.log("[v0] Using default location:", defaultLocation)
       setUserLocation(defaultLocation)
       storage.setUserLocation(defaultLocation)
       loadBirdSpawns(defaultLocation)
@@ -41,15 +41,7 @@ export default function MapPage() {
 
     setLoading(false)
 
-    if (typeof window !== "undefined" && "DeviceOrientationEvent" in window) {
-      const handleOrientation = (event: DeviceOrientationEvent) => {
-        if (event.alpha !== null) {
-          setHeading(event.alpha)
-        }
-      }
-      window.addEventListener("deviceorientation", handleOrientation)
-      return () => window.removeEventListener("deviceorientation", handleOrientation)
-    }
+    
   }, [])
 
   useEffect(() => {
@@ -121,73 +113,120 @@ export default function MapPage() {
     }
   }, [userLocation])
 
-  const loadBirdSpawns = (location: { lat: number; lng: number }) => {
+  const loadBirdSpawns = async (location: { lat: number; lng: number }) => {
     let spawns = storage.getBirdSpawns()
     const now = Date.now()
-
-    console.log("[v0] Loading bird spawns, current count:", spawns.length)
 
     // Remove expired spawns
     spawns = spawns.filter((spawn) => spawn.expiresAt > now)
 
     if (spawns.length === 0) {
-      console.log("[v0] No spawns found, generating new ones")
-      spawns = generateBirdSpawns(location, 5)
-      storage.setBirdSpawns(spawns)
+      try {
+        const pool = await fetchEbirdSpecies(location)
+        spawns = generateBirdSpawns(location, 5, pool || undefined)
+        storage.setBirdSpawns(spawns)
+      } catch (error) {
+        // Fallback: generate with empty pool
+        spawns = generateBirdSpawns(location, 5)
+        storage.setBirdSpawns(spawns)
+      }
     }
 
-    console.log("[v0] Final spawns count:", spawns.length)
     setBirdSpawns(spawns)
     setNearbyCount(spawns.length)
   }
 
-  const generateNewBirds = (location: { lat: number; lng: number }) => {
-    console.log("[v0] Generating new birds at location:", location)
-    const newSpawns = generateBirdSpawns(location, 3) // Generate 3 new birds
-    console.log("[v0] Generated new spawns:", newSpawns.length)
+  const generateNewBirds = async (location: { lat: number; lng: number }) => {
+    const pool = await fetchEbirdSpecies(location)
+    const newSpawns = generateBirdSpawns(location, 3, pool || undefined)
     const existingSpawns = storage.getBirdSpawns()
     const allSpawns = [...existingSpawns, ...newSpawns]
-    console.log("[v0] Total spawns after generation:", allSpawns.length)
     storage.setBirdSpawns(allSpawns)
     setBirdSpawns(allSpawns)
     setNearbyCount(allSpawns.length)
   }
 
-  const generateBirdSpawns = (center: { lat: number; lng: number }, count: number): BirdSpawn[] => {
-    console.log("[v0] generateBirdSpawns called with count:", count)
+  async function resolveImage(name: string) {
+    try {
+      const r = await fetch(`/api/bird-image?q=${encodeURIComponent(name)}`)
+      if (!r.ok) return null
+      const j = await r.json()
+      return j.imageUrl as string | null
+    } catch {
+      return null
+    }
+  }
+
+  async function fetchEbirdSpecies(center: { lat: number; lng: number }) {
+    const cellKey = `${center.lat.toFixed(2)},${center.lng.toFixed(2)}`
+    const cached = storage.getEbirdSpeciesCache(cellKey)
+    if (cached && cached.length > 0) {
+      setDynamicBirds(cached)
+      return cached as DynamicBird[]
+    }
+    try {
+      const url = `/api/ebird/recent?lat=${center.lat}&lng=${center.lng}&dist=50&back=30`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`eBird fetch failed: ${res.status}`)
+      const data = (await res.json()) as any[]
+      
+      // Map birds and enrich with images (limit to 10 for performance)
+      const base = data.map(mapObsToBird)
+      const enriched = await Promise.all(
+        base.slice(0, 10).map(async (b) => {
+          try {
+            const imgRes = await fetch(`/api/bird-image?q=${encodeURIComponent(b.species || b.name)}&speciesCode=${b.id}`)
+            const imgData = await imgRes.json()
+            return { ...b, imageUrl: imgData.imageUrl || "/placeholder.jpg" }
+          } catch {
+            return { ...b, imageUrl: "/placeholder.jpg" }
+          }
+        })
+      )
+      storage.setEbirdSpeciesCache(cellKey, enriched)
+      setDynamicBirds(enriched)
+      return enriched
+    } catch (e) {
+      setDynamicBirds(null)
+      return null
+    }
+  }
+
+  const pickBirdList = async (center: { lat: number; lng: number }) => {
+    const eb = await fetchEbirdSpecies(center)
+    if (eb && eb.length > 0) return eb
+    return BIRDS
+  }
+
+  const generateBirdSpawns = (center: { lat: number; lng: number }, count: number, poolOverride?: any[]): BirdSpawn[] => {
     const spawns: BirdSpawn[] = []
-    const radius = 0.001 // Reduced radius to ~100m for better visibility
+    const radius = 0.001 // ~100m radius
+    const pool: any[] = poolOverride && poolOverride.length > 0 ? poolOverride : (dynamicBirds && dynamicBirds.length > 0 ? dynamicBirds : BIRDS)
+    
+    // Pre-filter birds by rarity for better performance
+    const commonBirds = pool.filter((b) => b.rarity === "common")
+    const uncommonBirds = pool.filter((b) => b.rarity === "uncommon")
+    const rareBirds = pool.filter((b) => b.rarity === "rare")
+    const legendaryBirds = pool.filter((b) => b.rarity === "legendary")
 
     for (let i = 0; i < count; i++) {
-      // Random bird based on rarity
       const rand = Math.random()
-      let bird
-      if (rand < 0.5) {
-        // 50% common
-        bird = BIRDS.filter((b) => b.rarity === "common")[
-          Math.floor(Math.random() * BIRDS.filter((b) => b.rarity === "common").length)
-        ]
-      } else if (rand < 0.8) {
-        // 30% uncommon
-        bird = BIRDS.filter((b) => b.rarity === "uncommon")[
-          Math.floor(Math.random() * BIRDS.filter((b) => b.rarity === "uncommon").length)
-        ]
-      } else if (rand < 0.95) {
-        // 15% rare
-        bird = BIRDS.filter((b) => b.rarity === "rare")[
-          Math.floor(Math.random() * BIRDS.filter((b) => b.rarity === "rare").length)
-        ]
-      } else {
-        // 5% legendary
-        bird = BIRDS.filter((b) => b.rarity === "legendary")[
-          Math.floor(Math.random() * BIRDS.filter((b) => b.rarity === "legendary").length)
-        ]
+      let bird: any
+      
+      if (rand < 0.5 && commonBirds.length > 0) {
+        bird = commonBirds[Math.floor(Math.random() * commonBirds.length)]
+      } else if (rand < 0.8 && uncommonBirds.length > 0) {
+        bird = uncommonBirds[Math.floor(Math.random() * uncommonBirds.length)]
+      } else if (rand < 0.95 && rareBirds.length > 0) {
+        bird = rareBirds[Math.floor(Math.random() * rareBirds.length)]
+      } else if (legendaryBirds.length > 0) {
+        bird = legendaryBirds[Math.floor(Math.random() * legendaryBirds.length)]
       }
 
       if (bird) {
         spawns.push({
           id: `${Date.now()}-${i}`,
-          birdId: bird.id,
+          birdId: String(bird.id),
           lat: center.lat + (Math.random() - 0.5) * radius,
           lng: center.lng + (Math.random() - 0.5) * radius,
           expiresAt: Date.now() + 30 * 60 * 1000, // 30 minutes
@@ -195,7 +234,6 @@ export default function MapPage() {
       }
     }
 
-    console.log("[v0] Generated spawns:", spawns)
     return spawns
   }
 
@@ -214,6 +252,7 @@ export default function MapPage() {
         (error) => {
           console.error("Error getting location:", error)
         },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
       )
     }
   }
@@ -225,60 +264,28 @@ export default function MapPage() {
     }
   }
 
-  const debugSpawnBirds = () => {
-    console.log("[v0] Debug spawn button clicked")
-    console.log("[v0] Current userLocation:", userLocation)
+  const debugSpawnBirds = async () => {
     if (userLocation) {
-      // Generate birds directly in front of the user (within 50m and in view)
-      const debugSpawns: BirdSpawn[] = []
-      const distances = [20, 40, 60] // Different distances for variety
-
-      for (let i = 0; i < 3; i++) {
-        const rand = Math.random()
-        let bird
-        if (rand < 0.5) {
-          bird = BIRDS.filter((b) => b.rarity === "common")[
-            Math.floor(Math.random() * BIRDS.filter((b) => b.rarity === "common").length)
-          ]
-        } else if (rand < 0.8) {
-          bird = BIRDS.filter((b) => b.rarity === "uncommon")[
-            Math.floor(Math.random() * BIRDS.filter((b) => b.rarity === "uncommon").length)
-          ]
-        } else if (rand < 0.95) {
-          bird = BIRDS.filter((b) => b.rarity === "rare")[
-            Math.floor(Math.random() * BIRDS.filter((b) => b.rarity === "rare").length)
-          ]
-        } else {
-          bird = BIRDS.filter((b) => b.rarity === "legendary")[
-            Math.floor(Math.random() * BIRDS.filter((b) => b.rarity === "legendary").length)
-          ]
-        }
-
-        if (bird) {
-          // Place birds in front of user (small offset in lat/lng)
+      const pool = await fetchEbirdSpecies(userLocation)
+      const debugSpawns = generateBirdSpawns(userLocation, 3, pool)
+      
+      // Place birds in front of user
+      const distances = [20, 40, 60]
+      debugSpawns.forEach((spawn, i) => {
+        if (i < distances.length) {
           const distance = distances[i]
-          const angle = (Math.random() - 0.5) * 0.5 // Small angle variation (-0.25 to 0.25 radians)
-          const latOffset = (distance / 111000) * Math.cos(angle) // Convert meters to degrees
+          const angle = (Math.random() - 0.5) * 0.5
+          const latOffset = (distance / 111000) * Math.cos(angle)
           const lngOffset = (distance / (111000 * Math.cos((userLocation.lat * Math.PI) / 180))) * Math.sin(angle)
-
-          debugSpawns.push({
-            id: `debug-${Date.now()}-${i}`,
-            birdId: bird.id,
-            lat: userLocation.lat + latOffset,
-            lng: userLocation.lng + lngOffset,
-            expiresAt: Date.now() + 30 * 60 * 1000,
-          })
+          spawn.lat = userLocation.lat + latOffset
+          spawn.lng = userLocation.lng + lngOffset
         }
-      }
+      })
 
-      console.log("[v0] Generated debug spawns:", debugSpawns)
       storage.setBirdSpawns(debugSpawns)
       setBirdSpawns(debugSpawns)
       setNearbyCount(debugSpawns.length)
       setDistanceWalked(0)
-      console.log("[v0] Birds spawned successfully in front of user")
-    } else {
-      console.log("[v0] No user location available")
     }
   }
 
@@ -345,8 +352,9 @@ export default function MapPage() {
           <FirstPersonView
             userLocation={userLocation}
             birdSpawns={birdSpawns}
-            heading={heading}
+            heading={0}
             onBirdCaptured={handleBirdCaptured}
+            dynamicBirds={dynamicBirds}
           />
         )}
       </main>

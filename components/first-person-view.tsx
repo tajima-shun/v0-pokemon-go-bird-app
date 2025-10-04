@@ -7,15 +7,17 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Camera, X, Check } from "lucide-react"
 import { storage } from "@/lib/storage"
+import type { DynamicBird } from "@/lib/ebird"
 
 interface FirstPersonViewProps {
   userLocation: { lat: number; lng: number }
   birdSpawns: BirdSpawn[]
   heading: number
   onBirdCaptured: () => void
+  dynamicBirds?: DynamicBird[] | null
 }
 
-export function FirstPersonView({ userLocation, birdSpawns, heading, onBirdCaptured }: FirstPersonViewProps) {
+export function FirstPersonView({ userLocation, birdSpawns, heading, onBirdCaptured, dynamicBirds }: FirstPersonViewProps) {
   const [selectedBird, setSelectedBird] = useState<{
     bird: (typeof BIRDS)[0]
     spawn: BirdSpawn
@@ -25,7 +27,8 @@ export function FirstPersonView({ userLocation, birdSpawns, heading, onBirdCaptu
   const [failed, setFailed] = useState(false)
 
   const birdsWithDistance = birdSpawns.map((spawn) => {
-    const bird = BIRDS.find((b) => b.id === spawn.birdId)
+    // Try to find bird in dynamicBirds first, then fallback to BIRDS
+    const bird = (dynamicBirds && dynamicBirds.length > 0 ? dynamicBirds : BIRDS).find((b) => b.id === spawn.birdId)
     const distance = calculateDistance(userLocation.lat, userLocation.lng, spawn.lat, spawn.lng)
     const bearing = getBearing(userLocation.lat, userLocation.lng, spawn.lat, spawn.lng)
     const relativeBearing = (bearing - heading + 360) % 360
@@ -117,13 +120,43 @@ export function FirstPersonView({ userLocation, birdSpawns, heading, onBirdCaptu
 
   return (
     <div className="relative w-full h-full">
-      {/* Background - simulated camera view */}
-      <div className="absolute inset-0 bg-gradient-to-b from-sky-300 via-sky-200 to-emerald-100">
-        {/* Horizon line */}
-        <div className="absolute top-1/2 left-0 right-0 h-px bg-white/30" />
-
-        {/* Ground texture */}
-        <div className="absolute bottom-0 left-0 right-0 h-1/2 bg-gradient-to-b from-emerald-100 to-emerald-200" />
+      {/* Background - anime-style first-person road scene */}
+      <div className="absolute inset-0 overflow-hidden">
+        {/* Sky */}
+        <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-sky-300 via-sky-200 to-sky-100" />
+        {/* Clouds */}
+        <div className="absolute top-6 left-8 w-24 h-12 bg-white/70 rounded-full blur-sm animate-cloud-1" />
+        <div className="absolute top-12 right-10 w-32 h-14 bg-white/60 rounded-full blur-sm animate-cloud-2" />
+        {/* Ground with perspective (anime-like grid and roundabouts) */}
+        <div className="absolute bottom-0 left-0 right-0 h-1/2">
+          {/* Base grass */}
+          <div className="absolute inset-0 bg-gradient-to-b from-emerald-200 to-emerald-300" />
+          {/* Perspective road plane */}
+          <div className="absolute bottom-0 left-0 right-0 h-full" style={{ transform: "perspective(900px) rotateX(58deg)" }}>
+            {/* Road grid base */}
+            <div className="absolute inset-0" style={{
+              backgroundImage:
+                "repeating-linear-gradient(90deg, #6a8f9b 0 12px, #90b0ba 12px 120px), repeating-linear-gradient(0deg, #6a8f9b 0 12px, #90b0ba 12px 120px)",
+              backgroundBlendMode: "multiply",
+            }} />
+            {/* Road borders */}
+            <div className="absolute inset-0" style={{
+              backgroundImage:
+                "repeating-linear-gradient(90deg, transparent 0 10px, rgba(255,255,255,0.9) 10px 12px, transparent 12px 120px), repeating-linear-gradient(0deg, transparent 0 10px, rgba(255,255,255,0.9) 10px 12px, transparent 12px 120px)",
+            }} />
+            {/* Roundabouts */}
+            <div className="absolute left-[18%] top-[35%] w-24 h-24 rounded-full border-[10px] border-white/90" style={{ background: "#6a8f9b" }} />
+            <div className="absolute right-[22%] top-[52%] w-16 h-16 rounded-full border-8 border-white/90" style={{ background: "#6a8f9b" }} />
+            {/* Diagonal accents to fake depth */}
+            <div className="absolute left-0 right-0 top-0 bottom-0" style={{ backgroundImage: "linear-gradient(75deg, transparent 0 49%, rgba(0,0,0,0.04) 49% 51%, transparent 51%)" }} />
+          </div>
+          {/* Trees (simple ovals) */}
+          <div className="absolute bottom-24 left-10 w-8 h-12 bg-emerald-700/90 rounded-full shadow-md" />
+          <div className="absolute bottom-20 left-24 w-6 h-9 bg-emerald-600/90 rounded-full shadow" />
+          <div className="absolute bottom-28 right-20 w-10 h-14 bg-emerald-700/90 rounded-full shadow-md" />
+        </div>
+        {/* Horizon glow */}
+        <div className="absolute top-1/2 left-0 right-0 h-8 bg-white/30 blur-md" />
       </div>
 
       {/* Compass indicator */}

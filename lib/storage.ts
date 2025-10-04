@@ -63,4 +63,15 @@ export const storage = {
     movement.totalDistance = 0
     this.setUserMovement(movement)
   },
+
+  // eBird species cache (by cell key)
+  getEbirdSpeciesCache(cellKey: string): any[] | null {
+    if (typeof window === "undefined") return null
+    const data = localStorage.getItem(`ebirdSpecies:${cellKey}`)
+    return data ? JSON.parse(data) : null
+  },
+
+  setEbirdSpeciesCache(cellKey: string, species: any[]): void {
+    localStorage.setItem(`ebirdSpecies:${cellKey}`, JSON.stringify(species))
+  },
 }
