@@ -252,13 +252,26 @@ export function CanvasMapView({ userLocation, birdSpawns, onBirdCaptured, dynami
       if (!img) {
         img = new Image()
         img.crossOrigin = "anonymous"
-        img.src = bird.imageUrl || "/placeholder.svg?height=100&width=100"
+        
+        // Handle different image URL formats
+        let imageSrc = bird.imageUrl || "/placeholder.jpg"
+        if (imageSrc.startsWith("//")) {
+          imageSrc = `https:${imageSrc}`
+        } else if (imageSrc.startsWith("http://")) {
+          imageSrc = imageSrc.replace("http://", "https://")
+        }
+        
+        img.src = imageSrc
         img.onload = () => {
           const canvas = canvasRef.current
           if (canvas) {
             const event = new Event("imageLoaded")
             canvas.dispatchEvent(event)
           }
+        }
+        img.onerror = () => {
+          // Fallback to placeholder on error
+          img.src = "/placeholder.jpg"
         }
         birdImagesRef.current.set(imageKey, img)
       }

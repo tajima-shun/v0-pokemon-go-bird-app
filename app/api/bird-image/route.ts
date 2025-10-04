@@ -43,7 +43,11 @@ export async function GET(req: Request) {
         const page = djson?.query?.pages?.[pageId]
         const thumb = page?.thumbnail?.source
         if (thumb) {
-          return NextResponse.json({ imageUrl: thumb })
+          // Ensure HTTPS URL for external images
+          const imageUrl = thumb.startsWith('//') ? `https:${thumb}` : 
+                          thumb.startsWith('http://') ? thumb.replace('http://', 'https://') : 
+                          thumb
+          return NextResponse.json({ imageUrl })
         }
       }
     } catch (e) {
@@ -69,9 +73,11 @@ export async function GET(req: Request) {
       }
     }
 
-    return NextResponse.json({ imageUrl: null })
+    // Return placeholder image as fallback
+    return NextResponse.json({ imageUrl: "/placeholder.jpg" })
   } catch (e) {
-    return NextResponse.json({ imageUrl: null })
+    // Return placeholder image as fallback on error
+    return NextResponse.json({ imageUrl: "/placeholder.jpg" })
   }
 }
 
