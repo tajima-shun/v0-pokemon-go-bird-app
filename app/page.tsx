@@ -5,7 +5,7 @@ import { Navigation, RefreshCw, Bug } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { BottomNav } from "@/components/bottom-nav"
-import { FirstPersonView } from "@/components/first-person-view"
+import { CanvasMapView } from "@/components/canvas-map-view"
 import { BIRDS, type BirdSpawn } from "@/lib/birds"
 import { storage } from "@/lib/storage"
 import { calculateDistance } from "@/lib/geo-utils"
@@ -347,12 +347,11 @@ export default function MapPage() {
         </Card>
       </div>
 
-      <main className="h-[100svh]">
+      <main className="absolute inset-0 h-[100svh] w-full">
         {userLocation && (
-          <FirstPersonView
+          <CanvasMapView
             userLocation={userLocation}
             birdSpawns={birdSpawns}
-            heading={0}
             onBirdCaptured={handleBirdCaptured}
             dynamicBirds={dynamicBirds}
           />
