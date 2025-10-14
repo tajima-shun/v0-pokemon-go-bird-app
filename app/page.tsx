@@ -5,7 +5,6 @@ import { Navigation, RefreshCw, Bug } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { BottomNav } from "@/components/bottom-nav"
-import { CanvasMapView } from "@/components/canvas-map-view"
 import { BIRDS, type BirdSpawn } from "@/lib/birds"
 import { storage } from "@/lib/storage"
 import { calculateDistance } from "@/lib/geo-utils"
@@ -267,7 +266,7 @@ export default function MapPage() {
   const debugSpawnBirds = async () => {
     if (userLocation) {
       const pool = await fetchEbirdSpecies(userLocation)
-      const debugSpawns = generateBirdSpawns(userLocation, 3, pool)
+      const debugSpawns = generateBirdSpawns(userLocation, 3, pool || undefined)
       
       // Place birds in front of user
       const distances = [20, 40, 60]
@@ -348,14 +347,12 @@ export default function MapPage() {
       </div>
 
       <main className="absolute inset-0 h-[100svh] w-full">
-        {userLocation && (
-          <CanvasMapView
-            userLocation={userLocation}
-            birdSpawns={birdSpawns}
-            onBirdCaptured={handleBirdCaptured}
-            dynamicBirds={dynamicBirds}
-          />
-        )}
+        <iframe
+          src="https://tajin.8thwall.app/creature/"
+          allow="camera; microphone; geolocation; accelerometer; magnetometer; gyroscope; autoplay; clipboard-read; clipboard-write; fullscreen"
+          allowFullScreen
+          className="w-full h-full border-0"
+        />
       </main>
 
       <BottomNav />
