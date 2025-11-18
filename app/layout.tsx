@@ -5,9 +5,20 @@ import Script from "next/script"
 
 
 export const metadata: Metadata = {
-  title: "バードGO - 鳥観察アプリ",
-  description: "ポケモンGO風の鳥観察・収集アプリ",
-    generator: 'v0.app'
+  title: "WildSpot - ポケモンGOの実際の生き物版",
+  description: "ポケモンGOの実際の生き物版",
+  generator: 'v0.app',
+  openGraph: {
+    title: "WildSpot",
+    description: "ポケモンGOの実際の生き物版",
+    url: "https://wildspot.vercel.app",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "WildSpot",
+    description: "ポケモンGOの実際の生き物版",
+  },
 }
 
 export default function RootLayout({
