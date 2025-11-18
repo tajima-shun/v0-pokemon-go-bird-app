@@ -11,12 +11,9 @@ import { BattleLoading } from '@/components/battle-loading'
 import { mapObsToBird, type DynamicBird } from '../../../lib/ebird'
 
 // /ar ページは常に動的扱いにする（静的プリレンダリングしない）
-// Next.js 14では、これらの設定で静的生成を完全に無効化
+// Next.js 14では、dynamic = 'force-dynamic' で静的生成を完全に無効化
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const revalidate = 0
-export const fetchCache = 'force-no-store'
-export const dynamicParams = true
 
 const generateSessionId = (): string => {
   return `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
