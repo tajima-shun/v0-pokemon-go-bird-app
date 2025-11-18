@@ -30,6 +30,16 @@ export const BIRDS: Bird[] = [
     imageUrl: "/placeholder.jpg",
     description: "都市部でよく見られる鳥",
     habitat: "都市、森林",
+  },
+  {
+    id: "fallback-3",
+    name: "Coal Tit",
+    nameJa: "コガラ",
+    species: "Periparus ater",
+    rarity: "common",
+    imageUrl: "/placeholder.jpg",
+    description: "小さなシジュウカラの仲間",
+    habitat: "森林、公園",
   }
 ]
 
