@@ -5,7 +5,11 @@ import { useSearchParams } from 'next/navigation'
 import { arBridge } from '../../../src/utils/arBridge'
 import type { ArToApp, AppToAr, BirdSpawn } from '../../../src/types/ar'
 import { pokedexStore } from '../../../src/stores/pokedex'
-import { BIRDS } from '../../../lib/birds'
+import { levelStore } from '../../../src/stores/level'
+// BIRDSは使用しない（APIから取得した情報のみを使用）
+import { BattleModal } from '@/components/battle-modal'
+import { BattleLoading } from '@/components/battle-loading'
+import { mapObsToBird, type DynamicBird } from '../../../lib/ebird'
 
 const generateSessionId = (): string => {
   return `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
@@ -19,6 +23,8 @@ export default function ARPage() {
   const [sessionId] = useState(() => generateSessionId())
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [battleTarget, setBattleTarget] = useState<{ id: string; name: string; nameJa: string; species: string; imageUrl: string; rarity: "common" | "uncommon" | "rare" | "legendary" } | null>(null)
+  const [isBattleLoading, setIsBattleLoading] = useState(false)
   const pendingCaptures = useRef<Map<string, { birdId: string; species: string; lat: number; lng: number }>>(new Map())
   const searchParams = useSearchParams()
   
@@ -138,24 +144,253 @@ export default function ARPage() {
     capturedAt: number
   }) => {
     console.log('handleBirdCaptured called with:', payload)
+
+    // 図鑑に登録があるかチェック（先にチェックして、バトルが必要かどうかを判断）
+    const pokedexEntries = pokedexStore.getAllEntries()
+    const needsBattle = pokedexEntries.length > 0
+
+    // バトルが必要な場合は、即座にロード画面を表示
+    if (needsBattle) {
+      setIsBattleLoading(true)
+    }
+
+    // 位置情報から取得した鳥のリストを取得
+    let availableBirds: DynamicBird[] = []
     
+    // まず、位置情報からeBird APIで鳥を取得（図鑑ページと同じロジック）
+    if (userLocation) {
+      try {
+        const res = await fetch(`/api/ebird/recent?lat=${userLocation.lat}&lng=${userLocation.lng}&dist=50&back=30`)
+        if (res.ok) {
+          const arr = await res.json()
+          // mapObsToBirdを使ってDynamicBird形式に変換
+          const base = arr.map(mapObsToBird)
+          
+          // 画像取得を最適化：バトルが必要な場合は最初の1件だけ画像を取得し、残りは後で
+          if (needsBattle && base.length > 0) {
+            // バトル用：最初の1件だけ画像を取得
+            const firstBird = base[0]
+            try {
+              const imgRes = await fetch(`/api/bird-image?q=${encodeURIComponent(firstBird.species || firstBird.name)}&speciesCode=${firstBird.id}`)
+              const imgData = await imgRes.json()
+              availableBirds = [{
+                ...firstBird,
+                imageUrl: imgData.imageUrl || "/placeholder.jpg",
+                nameJa: imgData.nameJa || firstBird.nameJa || firstBird.name,
+                name: imgData.name || firstBird.name,
+              }]
+            } catch {
+              availableBirds = [{ ...firstBird, imageUrl: "/placeholder.jpg" }]
+            }
+            
+            // 残りの鳥は画像なしで追加（バックグラウンドで画像を取得）
+            availableBirds = [
+              ...availableBirds,
+              ...base.slice(1, 30).map(b => ({ ...b, imageUrl: "/placeholder.jpg" }))
+            ]
+            
+            // バックグラウンドで画像を取得（非同期、バトル表示をブロックしない）
+            Promise.all(
+              base.slice(1, 30).map(async (b) => {
+                try {
+                  const imgRes = await fetch(`/api/bird-image?q=${encodeURIComponent(b.species || b.name)}&speciesCode=${b.id}`)
+                  const imgData = await imgRes.json()
+                  return { 
+                    ...b, 
+                    imageUrl: imgData.imageUrl || "/placeholder.jpg",
+                    nameJa: imgData.nameJa || b.nameJa || b.name,
+                    name: imgData.name || b.name,
+                  }
+                } catch {
+                  return { ...b, imageUrl: "/placeholder.jpg" }
+                }
+              })
+            ).then(images => {
+              // 画像が取得できたら更新（ただし、バトル画面には影響しない）
+              console.log('Background images loaded:', images.length)
+            })
+          } else {
+            // バトル不要な場合：通常通り全件取得
+            availableBirds = await Promise.all(
+              base.slice(0, 30).map(async (b) => {
+                try {
+                  const imgRes = await fetch(`/api/bird-image?q=${encodeURIComponent(b.species || b.name)}&speciesCode=${b.id}`)
+                  const imgData = await imgRes.json()
+                  return { 
+                    ...b, 
+                    imageUrl: imgData.imageUrl || "/placeholder.jpg",
+                    nameJa: imgData.nameJa || b.nameJa || b.name,
+                    name: imgData.name || b.name,
+                  }
+                } catch {
+                  return { ...b, imageUrl: "/placeholder.jpg" }
+                }
+              })
+            )
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch birds from location:', error)
+      }
+    }
+
+    // 位置情報から取得できなかった場合、図鑑に既に登録されている鳥から選択
+    if (availableBirds.length === 0) {
+      const pokedexEntries = pokedexStore.getAllEntries()
+      if (pokedexEntries.length > 0) {
+        availableBirds = pokedexEntries.map(entry => ({
+          id: entry.birdId,
+          name: entry.meta?.name || 'Unknown',
+          nameJa: entry.meta?.nameJa || '不明',
+          species: entry.species,
+          rarity: (entry.meta?.rarity as "common" | "uncommon" | "rare" | "legendary") || "common",
+          imageUrl: entry.meta?.imageUrl || "/placeholder.jpg",
+          description: entry.meta?.description || "",
+          habitat: entry.meta?.habitat || "",
+        }))
+      }
+    }
+
+    // BIRDSのフォールバックは使用しない（APIから取得した情報のみを使用）
+    // 位置情報が取得できない場合は、空のリストのままにする
+
+    // ランダムに1つ選択
+    if (availableBirds.length === 0) {
+      console.warn('AR page: No birds available from API or pokedex')
+      setIsBattleLoading(false)
+      return
+    }
+
+    let randomBird = availableBirds[Math.floor(Math.random() * availableBirds.length)]
+    console.log('Selected random bird:', randomBird)
+
+    // 選択した鳥の画像が取得されていない場合（placeholderの場合）、画像を取得
+    if (randomBird.imageUrl === "/placeholder.jpg" && randomBird.species) {
+      try {
+        const imgRes = await fetch(`/api/bird-image?q=${encodeURIComponent(randomBird.species || randomBird.name)}&speciesCode=${randomBird.id}`)
+        const imgData = await imgRes.json()
+        randomBird = {
+          ...randomBird,
+          imageUrl: imgData.imageUrl || "/placeholder.jpg",
+          nameJa: imgData.nameJa || randomBird.nameJa || randomBird.name,
+          name: imgData.name || randomBird.name,
+        }
+        console.log('Image fetched for selected bird:', randomBird)
+      } catch (error) {
+        console.error('Failed to fetch image for selected bird:', error)
+        // エラーでも続行（placeholderのまま）
+      }
+    }
+
+    // 図鑑に何も登録されていない場合は、バトルをせずに直接登録
+    if (pokedexEntries.length === 0) {
+      console.log('AR page: Pokedex is empty, capturing directly without battle')
+      // 直接捕獲処理を実行
+      if (!userLocation) {
+        console.warn('User location not available')
+        setError('位置情報が取得できません')
+        return
+      }
+
+      const captureId = `capture-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      console.log('Generated captureId:', captureId)
+
+      try {
+        const requestBody = {
+          captureId,
+          birdId: randomBird.id,
+          species: randomBird.species,
+          lat: userLocation.lat,
+          lng: userLocation.lng,
+        }
+        console.log('Sending capture request:', requestBody)
+
+        const res = await fetch('/api/pokedex/capture', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        })
+
+        if (!res.ok) {
+          const errorText = await res.text()
+          throw new Error(`Capture API failed: ${res.status} - ${errorText}`)
+        }
+
+        const apiEntry = await res.json()
+        console.log('API response:', apiEntry)
+
+        const entry = {
+          ...apiEntry,
+          meta: {
+            ...apiEntry.meta,
+            name: randomBird.name,
+            nameJa: randomBird.nameJa,
+            rarity: randomBird.rarity,
+            imageUrl: randomBird.imageUrl,
+            description: '',
+            habitat: '',
+          },
+        }
+
+        console.log('Adding entry to pokedex:', entry)
+        const added = pokedexStore.addEntry(entry, captureId)
+        if (added) {
+          console.log('✅ 鳥を図鑑に登録しました:', entry)
+          
+          // XPを付与（基本XP: 50、レアリティに応じて調整）
+          const { leveledUp, newLevel } = levelStore.addXp(50, randomBird.rarity)
+          if (leveledUp) {
+            console.log(`🎉 レベルアップ！ レベル ${newLevel} に到達しました！`)
+            setError(`${randomBird.nameJa || randomBird.name}を獲得しました！🎉 レベル ${newLevel} に到達しました！`)
+          } else {
+            setError(`${randomBird.nameJa || randomBird.name}を獲得しました！`)
+          }
+          setTimeout(() => {
+            setError(null)
+          }, 3000)
+        } else {
+          console.warn('⚠️ 図鑑への登録がスキップされました（重複の可能性）')
+        }
+      } catch (err) {
+        console.error('❌ 捕獲処理に失敗しました:', err)
+        setError(`捕獲処理に失敗しました: ${err instanceof Error ? err.message : String(err)}`)
+      }
+      return
+    }
+
+    // 図鑑に登録がある場合は、バトル対象として設定
+    setBattleTarget({
+      id: randomBird.id,
+      name: randomBird.name,
+      nameJa: randomBird.nameJa,
+      species: randomBird.species,
+      imageUrl: randomBird.imageUrl,
+      rarity: randomBird.rarity,
+    })
+    
+    // ロード画面を非表示にする（バトル画面が表示される）
+    setIsBattleLoading(false)
+  }
+
+  // バトル勝利時の処理
+  const handleBattleVictory = async () => {
+    if (!battleTarget) return
+
     if (!userLocation) {
       console.warn('User location not available')
       setError('位置情報が取得できません')
+      setBattleTarget(null)
       return
     }
 
     const captureId = `capture-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
     console.log('Generated captureId:', captureId)
 
-    const coalTit = BIRDS.find((b) => b.species === 'Periparus ater' || b.name === 'Coal Tit' || b.nameJa === 'コガラ') || BIRDS.find((b) => b.id === 'fallback-3') || BIRDS[2]
-    console.log('Found coal tit:', coalTit)
-
     try {
       const requestBody = {
         captureId,
-        birdId: coalTit.id,
-        species: coalTit.species,
+        birdId: battleTarget.id,
+        species: battleTarget.species,
         lat: userLocation.lat,
         lng: userLocation.lng,
       }
@@ -171,7 +406,7 @@ export default function ARPage() {
         const errorText = await res.text()
         throw new Error(`Capture API failed: ${res.status} - ${errorText}`)
       }
-      
+
       const apiEntry = await res.json()
       console.log('API response:', apiEntry)
 
@@ -179,12 +414,12 @@ export default function ARPage() {
         ...apiEntry,
         meta: {
           ...apiEntry.meta,
-          name: coalTit.name,
-          nameJa: coalTit.nameJa,
-          rarity: coalTit.rarity,
-          imageUrl: coalTit.imageUrl,
-          description: coalTit.description,
-          habitat: coalTit.habitat,
+          name: battleTarget.name,
+          nameJa: battleTarget.nameJa,
+          rarity: battleTarget.rarity,
+          imageUrl: battleTarget.imageUrl,
+          description: '',
+          habitat: '',
         },
       }
 
@@ -192,13 +427,27 @@ export default function ARPage() {
       const added = pokedexStore.addEntry(entry, captureId)
       if (added) {
         console.log('✅ コガラを図鑑に登録しました:', entry)
-        setError(null)
+        
+        // XPを付与（基本XP: 50、レアリティに応じて調整）
+        const { leveledUp, newLevel } = levelStore.addXp(50, battleTarget.rarity)
+        if (leveledUp) {
+          console.log(`🎉 レベルアップ！ レベル ${newLevel} に到達しました！`)
+          setError(`🎉 レベル ${newLevel} に到達しました！`)
+          setTimeout(() => {
+            setError(null)
+          }, 3000)
+        } else {
+          setError(null)
+        }
       } else {
         console.warn('⚠️ 図鑑への登録がスキップされました（重複の可能性）')
       }
+
+      setBattleTarget(null)
     } catch (err) {
       console.error('❌ 捕獲処理に失敗しました:', err)
       setError(`捕獲処理に失敗しました: ${err instanceof Error ? err.message : String(err)}`)
+      setBattleTarget(null)
     }
   }
 
@@ -218,6 +467,17 @@ export default function ARPage() {
       const added = pokedexStore.addEntry(result.pokedexEntry, result.captureId)
       if (added) {
         console.log('Bird added to pokedex:', result.pokedexEntry)
+        
+        // XPを付与（基本XP: 50、レアリティに応じて調整）
+        const rarity = result.pokedexEntry.meta?.rarity as 'common' | 'uncommon' | 'rare' | 'legendary' | undefined
+        const { leveledUp, newLevel } = levelStore.addXp(50, rarity)
+        if (leveledUp) {
+          console.log(`🎉 レベルアップ！ レベル ${newLevel} に到達しました！`)
+          setError(`🎉 レベル ${newLevel} に到達しました！`)
+          setTimeout(() => {
+            setError(null)
+          }, 3000)
+        }
       }
     } else {
       setError(result.error || '捕獲に失敗しました')
@@ -338,7 +598,11 @@ export default function ARPage() {
       />
 
       {error && (
-        <div className="absolute top-4 left-4 right-4 z-50 bg-red-500 text-white p-4 rounded-lg shadow-lg">
+        <div className={`absolute top-4 left-4 right-4 z-50 p-4 rounded-lg shadow-lg ${
+          error.includes('獲得') || error.includes('登録') 
+            ? 'bg-emerald-500 text-white' 
+            : 'bg-red-500 text-white'
+        }`}>
           <p>{error}</p>
           <button
             onClick={() => setError(null)}
@@ -349,15 +613,30 @@ export default function ARPage() {
         </div>
       )}
 
-      {!isReady && (
-        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="text-white text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
-            <p>AR初期化中...</p>
-          </div>
+          {!isReady && (
+            <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="text-white text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
+                <p>AR初期化中...</p>
+              </div>
+            </div>
+          )}
+
+          {/* バトルモーダル */}
+          {/* バトルロード画面 */}
+          {isBattleLoading && <BattleLoading />}
+
+          {battleTarget && (
+            <BattleModal
+              targetBird={battleTarget}
+              onVictory={handleBattleVictory}
+              onCancel={() => {
+                setBattleTarget(null)
+                setIsBattleLoading(false)
+              }}
+            />
+          )}
         </div>
-      )}
-    </div>
-  )
-}
+      )
+    }
 

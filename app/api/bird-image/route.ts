@@ -29,6 +29,9 @@ export async function GET(req: Request) {
     }
 
     // 2) Try Wikipedia API
+    let imageUrl: string | null = null
+    let nameJa: string | null = null
+    let name: string | null = null
     try {
       const search = await fetch(
         `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(q)}&format=json&srlimit=1`
@@ -37,21 +40,36 @@ export async function GET(req: Request) {
       const pageId = sjson?.query?.search?.[0]?.pageid
       if (pageId) {
         const detail = await fetch(
-          `https://en.wikipedia.org/w/api.php?action=query&pageids=${pageId}&prop=pageimages&format=json&pithumbsize=400`
+          `https://en.wikipedia.org/w/api.php?action=query&pageids=${pageId}&prop=pageimages|langlinks&lllang=ja&format=json&pithumbsize=400`
         )
         const djson = await detail.json()
         const page = djson?.query?.pages?.[pageId]
         const thumb = page?.thumbnail?.source
         if (thumb) {
           // Ensure HTTPS URL for external images
-          const imageUrl = thumb.startsWith('//') ? `https:${thumb}` : 
+          imageUrl = thumb.startsWith('//') ? `https:${thumb}` : 
                           thumb.startsWith('http://') ? thumb.replace('http://', 'https://') : 
                           thumb
-          return NextResponse.json({ imageUrl })
+        }
+        // Get English name from page title
+        name = page?.title || null
+        // Get Japanese name from langlinks
+        if (page?.langlinks && page.langlinks.length > 0) {
+          const jaLink = page.langlinks.find((link: any) => link.lang === 'ja')
+          nameJa = jaLink?.title || null
         }
       }
     } catch (e) {
       // Wikipedia fetch failed, continue to other sources
+    }
+    
+    // If we got image and name from Wikipedia, return early
+    if (imageUrl) {
+      return NextResponse.json({ 
+        imageUrl,
+        nameJa: nameJa || null,
+        name: name || null,
+      })
     }
 
     // 3) Try Flickr API as fallback (if API key available)
@@ -64,8 +82,12 @@ export async function GET(req: Request) {
           const flickrData = await flickrRes.json()
           if (flickrData.photos?.photo?.[0]) {
             const photo = flickrData.photos.photo[0]
-            const imageUrl = `https://farm${photo.farm}.staticflickr.com/${photo.server}/${photo.id}_${photo.secret}_z.jpg`
-            return NextResponse.json({ imageUrl })
+            const flickrImageUrl = `https://farm${photo.farm}.staticflickr.com/${photo.server}/${photo.id}_${photo.secret}_z.jpg`
+            return NextResponse.json({ 
+              imageUrl: flickrImageUrl,
+              nameJa: nameJa || null,
+              name: name || null,
+            })
           }
         }
       } catch (e) {
@@ -74,10 +96,18 @@ export async function GET(req: Request) {
     }
 
     // Return placeholder image as fallback
-    return NextResponse.json({ imageUrl: "/placeholder.jpg" })
+    return NextResponse.json({ 
+      imageUrl: "/placeholder.jpg",
+      nameJa: nameJa || null,
+      name: name || null,
+    })
   } catch (e) {
     // Return placeholder image as fallback on error
-    return NextResponse.json({ imageUrl: "/placeholder.jpg" })
+    return NextResponse.json({ 
+      imageUrl: "/placeholder.jpg",
+      nameJa: null,
+      name: null,
+    })
   }
 }
 
