@@ -46,6 +46,8 @@ const getNextBadgeProgress = (uniqueCount: number): { nextBadge: BadgeType | nul
 }
 
 export default function PokedexPage() {
+  // ★ mounted フラグで「クライアントでのマウント完了」を判定
+  const [mounted, setMounted] = useState(false)
   const [caughtBirds, setCaughtBirds] = useState<CaughtBird[]>([])
   const [selectedBird, setSelectedBird] = useState<string | null>(null)
   const [regionBirds, setRegionBirds] = useState<DynamicBird[] | null>(null)
@@ -54,6 +56,10 @@ export default function PokedexPage() {
   const [levelState, setLevelState] = useState(levelStore.getState())
   const [xpProgress, setXpProgress] = useState(levelStore.getXpProgress())
   const [birdDescriptions, setBirdDescriptions] = useState<Map<string, { description: string | null; descriptionJa: string | null; loading: boolean }>>(new Map())
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   useEffect(() => {
     const loadBirds = () => {
@@ -341,15 +347,15 @@ export default function PokedexPage() {
           </p>
           <div className="grid grid-cols-3 gap-2 text-center mb-3">
             <div className="bg-primary-foreground/10 rounded-lg p-2">
-              <p className="text-2xl font-bold">{uniqueCaught}</p>
+              <p className="text-2xl font-bold">{mounted ? uniqueCaught : '-'}</p>
               <p className="text-xs opacity-90">種類</p>
             </div>
             <div className="bg-primary-foreground/10 rounded-lg p-2">
-              <p className="text-2xl font-bold">{totalCaught}</p>
+              <p className="text-2xl font-bold">{mounted ? totalCaught : '-'}</p>
               <p className="text-xs opacity-90">総捕獲数</p>
             </div>
             <div className="bg-primary-foreground/10 rounded-lg p-2">
-              <p className="text-2xl font-bold">{completionRate}%</p>
+              <p className="text-2xl font-bold">{mounted ? completionRate : '-'}%</p>
               <p className="text-xs opacity-90">完成度</p>
             </div>
           </div>
@@ -359,16 +365,16 @@ export default function PokedexPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <Trophy className="w-3.5 h-3.5" />
-                <span className="text-xs font-semibold">Lv.{levelState.level}</span>
+                <span className="text-xs font-semibold">Lv.{mounted ? levelState.level : '-'}</span>
               </div>
               <div className="flex-1 mx-2 bg-primary-foreground/20 rounded-full h-1.5">
                 <div
                   className="bg-yellow-400 h-1.5 rounded-full transition-all duration-300"
-                  style={{ width: `${xpProgress.percentage}%` }}
+                  style={{ width: mounted ? `${xpProgress.percentage}%` : '0%' }}
                 />
               </div>
               <span className="text-xs opacity-75">
-                {xpProgress.current}/{xpProgress.required}
+                {mounted ? `${xpProgress.current}/${xpProgress.required}` : '-/-'}
               </span>
             </div>
           </div>
